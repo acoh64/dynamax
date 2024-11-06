@@ -9,7 +9,7 @@ from dynamax.hidden_markov_model.models.transitions import StandardHMMTransition
 from dynamax.hidden_markov_model.models.linreg_hmm import LinearRegressionHMMEmissions, ParamsLinearRegressionHMMEmissions
 from dynamax.parameters import ParameterProperties
 from dynamax.types import Scalar
-from dynamax.utils.bijectors import RealToPSDBijector, RealToTracelessBijector
+from dynamax.utils.bijectors import RealToPSDBijector, RealToTracelessBijector, RealToPSDDiagonalBijector, DiagonalBijector
 from tensorflow_probability.substrates import jax as tfp
 from typing import NamedTuple, Optional, Tuple, Union
 
@@ -40,7 +40,8 @@ class LinearAutoregressiveHMMEmissions(LinearRegressionHMMEmissions):
                    emission_biases=None,
                    emission_covariances=None,
                    emissions=None,
-                   constrain_trace=False):
+                   constrain_trace=False,
+                   neural_model=False):
         if method.lower() == "kmeans":
             assert emissions is not None, "Need emissions to initialize the model with K-Means!"
             from sklearn.cluster import KMeans
@@ -77,6 +78,11 @@ class LinearAutoregressiveHMMEmissions(LinearRegressionHMMEmissions):
                 weights=ParameterProperties(constrainer=RealToTracelessBijector(self.emission_dim)),
                 biases=ParameterProperties(),
                 covs=ParameterProperties(constrainer=RealToPSDBijector()))
+        if neural_model:
+            props = ParamsLinearRegressionHMMEmissions(
+                weights=ParameterProperties(constrainer=DiagonalBijector()),
+                biases=ParameterProperties(),
+                covs=ParameterProperties(constrainer=RealToPSDDiagonalBijector()))
         return params, props
 
 
@@ -134,6 +140,7 @@ class LinearAutoregressiveHMM(HMM):
                    key: jr.PRNGKey=jr.PRNGKey(0),
                    method: str="prior",
                    constrain_trace: bool=False,
+                   neural_model: bool=False,
                    initial_probs: Optional[Float[Array, "num_states"]]=None,
                    transition_matrix: Optional[Float[Array, "num_states num_states"]]=None,
                    emission_weights: Optional[Float[Array, "num_states emission_dim emission_dim_times_num_lags"]]=None,
@@ -165,7 +172,7 @@ class LinearAutoregressiveHMM(HMM):
         params, props = dict(), dict()
         params["initial"], props["initial"] = self.initial_component.initialize(key1, method=method, initial_probs=initial_probs)
         params["transitions"], props["transitions"] = self.transition_component.initialize(key2, method=method, transition_matrix=transition_matrix)
-        params["emissions"], props["emissions"] = self.emission_component.initialize(key3, method=method, emission_weights=emission_weights, emission_biases=emission_biases, emission_covariances=emission_covariances, emissions=emissions, constrain_trace=constrain_trace)
+        params["emissions"], props["emissions"] = self.emission_component.initialize(key3, method=method, emission_weights=emission_weights, emission_biases=emission_biases, emission_covariances=emission_covariances, emissions=emissions, constrain_trace=constrain_trace, neural_model=neural_model)
         return ParamsLinearAutoregressiveHMM(**params), ParamsLinearAutoregressiveHMM(**props)
 
     def sample(self,
