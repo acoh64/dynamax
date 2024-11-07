@@ -161,8 +161,11 @@ class NambuBijector(tfb.Bijector):
         # return jax.vmap(self._tmp_inverse, in_axes=(0,))(y)
         results = []
         for element in y:
+            print(element)
+            print("here")
             result = self._tmp_inverse(element)
             results.append(result)
+        print("done")
         return jnp.array(results)
 
     def _tmp_forward(self, x):
@@ -220,11 +223,14 @@ class NambuBijector(tfb.Bijector):
             m43 - (2.0*h1_3 * (h2_2*h3_1 - h2_1*h3_2)),
         ])
     
-    def _recover_params(self, eq, init_center=0.0, init_scale=1.0, max_iter=100):
+    def _recover_params(self, eq, init_center=0.0, init_scale=1.0, max_iter=10000):
         res = None
         num_tries = 0
         while num_tries < max_iter:
-            res = root(eq, init_scale * (np.random.rand(12) - 0.5) + init_center)
+            if num_tries > 0 and num_tries % 1000 == 0:
+                init_scale *= 0.1
+                print(f"Reducing scale to {init_scale}")
+            res = root(eq, init_scale * np.random.randn(12) + init_center)
             if res.success:
                 break
             num_tries += 1
@@ -234,6 +240,6 @@ class NambuBijector(tfb.Bijector):
         return res
     
     def _tmp_inverse(self, x):
-        eqs = lambda params: self._equations(params, x)
+        eqs = jax.jit(lambda params: self._equations(params, x))
         res = self._recover_params(eqs)
         return res.x
