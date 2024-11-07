@@ -9,7 +9,7 @@ from dynamax.hidden_markov_model.models.transitions import StandardHMMTransition
 from dynamax.hidden_markov_model.models.linreg_hmm import LinearRegressionHMMEmissions, ParamsLinearRegressionHMMEmissions
 from dynamax.parameters import ParameterProperties
 from dynamax.types import Scalar
-from dynamax.utils.bijectors import RealToPSDBijector, RealToTracelessBijector, RealToPSDDiagonalBijector, DiagonalBijector
+from dynamax.utils.bijectors import RealToPSDBijector, RealToTracelessBijector, RealToPSDDiagonalBijector, DiagonalBijector, NambuBijector
 from tensorflow_probability.substrates import jax as tfp
 from typing import NamedTuple, Optional, Tuple, Union
 
@@ -41,7 +41,8 @@ class LinearAutoregressiveHMMEmissions(LinearRegressionHMMEmissions):
                    emission_covariances=None,
                    emissions=None,
                    constrain_trace=False,
-                   neural_model=False):
+                   neural_model=False,
+                   nambu_model=False):
         if method.lower() == "kmeans":
             assert emissions is not None, "Need emissions to initialize the model with K-Means!"
             from sklearn.cluster import KMeans
@@ -50,6 +51,8 @@ class LinearAutoregressiveHMMEmissions(LinearRegressionHMMEmissions):
             km = KMeans(self.num_states, random_state=int(sklearn_key)).fit(emissions.reshape(-1, self.emission_dim))
             _emission_weights = jnp.zeros((self.num_states, self.emission_dim, self.emission_dim * self.num_lags))
             _emission_biases = jnp.array(km.cluster_centers_)
+            if nambu_model:
+                _emission_biases = jnp.zeros((self.num_states, self.emission_dim))
             _emission_covs = jnp.tile(jnp.eye(self.emission_dim)[None, :, :], (self.num_states, 1, 1))
 
         elif method.lower() == "prior":
@@ -83,6 +86,11 @@ class LinearAutoregressiveHMMEmissions(LinearRegressionHMMEmissions):
                 weights=ParameterProperties(constrainer=DiagonalBijector()),
                 biases=ParameterProperties(),
                 covs=ParameterProperties(constrainer=RealToPSDDiagonalBijector()))
+        if nambu_model:
+            props = ParamsLinearRegressionHMMEmissions(
+                weights=ParameterProperties(constrainer=NambuBijector()),
+                biases=ParameterProperties(trainable=False),
+                covs=ParameterProperties(constrainer=RealToPSDBijector()))
         return params, props
 
 
@@ -141,6 +149,7 @@ class LinearAutoregressiveHMM(HMM):
                    method: str="prior",
                    constrain_trace: bool=False,
                    neural_model: bool=False,
+                   nambu_model: bool=False,
                    initial_probs: Optional[Float[Array, "num_states"]]=None,
                    transition_matrix: Optional[Float[Array, "num_states num_states"]]=None,
                    emission_weights: Optional[Float[Array, "num_states emission_dim emission_dim_times_num_lags"]]=None,
@@ -172,7 +181,7 @@ class LinearAutoregressiveHMM(HMM):
         params, props = dict(), dict()
         params["initial"], props["initial"] = self.initial_component.initialize(key1, method=method, initial_probs=initial_probs)
         params["transitions"], props["transitions"] = self.transition_component.initialize(key2, method=method, transition_matrix=transition_matrix)
-        params["emissions"], props["emissions"] = self.emission_component.initialize(key3, method=method, emission_weights=emission_weights, emission_biases=emission_biases, emission_covariances=emission_covariances, emissions=emissions, constrain_trace=constrain_trace, neural_model=neural_model)
+        params["emissions"], props["emissions"] = self.emission_component.initialize(key3, method=method, emission_weights=emission_weights, emission_biases=emission_biases, emission_covariances=emission_covariances, emissions=emissions, constrain_trace=constrain_trace, neural_model=neural_model, nambu_model=nambu_model)
         return ParamsLinearAutoregressiveHMM(**params), ParamsLinearAutoregressiveHMM(**props)
 
     def sample(self,
