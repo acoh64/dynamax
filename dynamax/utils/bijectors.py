@@ -149,7 +149,7 @@ class RealToPSDDiagonalBijector(tfb.Chain):
         ]
         super().__init__(bijectors, validate_args, validate_event_size, parameters, name)
 
-class NambuBijector(tfb.Bijector):
+class NambuBijector4D(tfb.Bijector):
     """Bijector that maps unconstrained real vectors to Nambu dynamics."""
     def __init__(self, name=None, validate_args=False):
         super().__init__(name=name, validate_args=validate_args, forward_min_event_ndims=1, inverse_min_event_ndims=2)
@@ -223,11 +223,11 @@ class NambuBijector(tfb.Bijector):
             m43 - (2.0*h1_3 * (h2_2*h3_1 - h2_1*h3_2)),
         ])
     
-    def _recover_params(self, eq, init_center=0.0, init_scale=1.0, max_iter=10000):
+    def _recover_params(self, eq, init_center=0.0, init_scale=1.0, max_iter=20000):
         res = None
         num_tries = 0
         while num_tries < max_iter:
-            if num_tries > 0 and num_tries % 1000 == 0:
+            if num_tries > 0 and num_tries % 2000 == 0:
                 init_scale *= 0.1
                 print(f"Reducing scale to {init_scale}")
             res = root(eq, init_scale * np.random.randn(12) + init_center)
@@ -243,3 +243,107 @@ class NambuBijector(tfb.Bijector):
         eqs = jax.jit(lambda params: self._equations(params, x))
         res = self._recover_params(eqs)
         return res.x
+    
+class NambuBijector3D(tfb.Bijector):
+    """Bijector that maps unconstrained real vectors to Nambu dynamics."""
+    def __init__(self, name=None, validate_args=False):
+        super().__init__(name=name, validate_args=validate_args, forward_min_event_ndims=1, inverse_min_event_ndims=2)
+
+    def _forward(self, x):
+        return jax.vmap(self._tmp_forward, in_axes=(0,))(x)
+
+    def _inverse(self, y):
+        # return jax.vmap(self._tmp_inverse, in_axes=(0,))(y)
+        results = []
+        for element in y:
+            print(element)
+            print("here")
+            result = self._tmp_inverse(element)
+            results.append(result)
+        print("done")
+        return jnp.array(results)
+
+    def _tmp_forward(self, x):
+       
+        a, b, c, g, h, k = x
+        
+        m12 = 2.0 * b * k
+        m13 = -2.0 * c * h
+        m21 = -2.0 * a * k
+        m23 = 2.0 * g * c
+        m31 = 2.0 * a * h
+        m32 = -2.0 * b * g
+
+        # need to put 1.0 along diagonal to account for time discretization
+        return jnp.array([[1.0, m12, m13], [m21, 1.0, m23], [m31, m32, 1.0]])
+    
+    def _equations(self, params, x):
+        a, b, c, g, h, k = params
+        M = x
+        m12 = M[0, 1]
+        m13 = M[0, 2]
+        m21 = M[1, 0]
+        m23 = M[1, 2]
+        m31 = M[2, 0]
+        m32 = M[2, 1]
+        
+        return jnp.array([
+            m12 - (2.0 * b * k),
+            m13 - (-2.0 * c * h),
+            m21 - (-2.0 * a * k),
+            m23 - (2.0 * g * c),
+            m31 - (2.0 * a * h),
+            m32 - (-2.0 * b * g)
+        ])
+    
+    def _recover_params(self, eq, init_center=0.0, init_scale=1.0, max_iter=20000):
+        res = None
+        num_tries = 0
+        while num_tries < max_iter:
+            if num_tries > 0 and num_tries % 2000 == 0:
+                init_scale *= 0.1
+                print(f"Reducing scale to {init_scale}")
+            res = root(eq, init_scale * np.random.randn(6) + init_center)
+            if res.success:
+                break
+            num_tries += 1
+        if num_tries == max_iter:
+            raise ValueError("Failed to converge")
+            # print("Failed to converge")
+        return res
+    
+    def _tmp_inverse(self, x):
+        eqs = jax.jit(lambda params: self._equations(params, x))
+        res = self._recover_params(eqs)
+        return res.x
+
+class NambuBijector2D(tfb.Bijector):
+    """Bijector that maps unconstrained real vectors to Nambu dynamics."""
+    def __init__(self, name=None, validate_args=False):
+        super().__init__(name=name, validate_args=validate_args, forward_min_event_ndims=1, inverse_min_event_ndims=2)
+
+    def _forward(self, x):
+        return jax.vmap(self._tmp_forward, in_axes=(0,))(x)
+
+    def _inverse(self, y):
+        return jax.vmap(self._tmp_inverse, in_axes=(0,))(y)        
+
+    def _tmp_forward(self, x):
+       
+        a, b, c = x
+        
+        m12 = 2.0 * b
+        m21 = -2.0 * a
+        m11 = c
+        m22 = -c
+
+        # need to put 1.0 along diagonal to account for time discretization
+        return jnp.array([[1.0 + m11, m12], [m21, 1.0 + m22]])
+    
+    def _tmp_inverse(self, x):
+        m12 = x[0, 1]
+        m21 = x[1, 0]
+        m11 = x[0, 0]
+        # m22 = x[1, 1]
+        # assert jnp.allclose(m11, -m22)
+        return jnp.array([-m21 / 2.0, m12 / 2.0, m11-1.0])

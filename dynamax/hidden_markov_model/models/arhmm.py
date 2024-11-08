@@ -9,7 +9,7 @@ from dynamax.hidden_markov_model.models.transitions import StandardHMMTransition
 from dynamax.hidden_markov_model.models.linreg_hmm import LinearRegressionHMMEmissions, ParamsLinearRegressionHMMEmissions
 from dynamax.parameters import ParameterProperties
 from dynamax.types import Scalar
-from dynamax.utils.bijectors import RealToPSDBijector, RealToTracelessBijector, RealToPSDDiagonalBijector, DiagonalBijector, NambuBijector
+from dynamax.utils.bijectors import RealToPSDBijector, RealToTracelessBijector, RealToPSDDiagonalBijector, DiagonalBijector, NambuBijector2D, NambuBijector3D, NambuBijector4D
 from tensorflow_probability.substrates import jax as tfp
 from typing import NamedTuple, Optional, Tuple, Union
 
@@ -87,10 +87,24 @@ class LinearAutoregressiveHMMEmissions(LinearRegressionHMMEmissions):
                 biases=ParameterProperties(),
                 covs=ParameterProperties(constrainer=RealToPSDDiagonalBijector()))
         if nambu_model:
-            props = ParamsLinearRegressionHMMEmissions(
-                weights=ParameterProperties(constrainer=NambuBijector()),
-                biases=ParameterProperties(trainable=False),
-                covs=ParameterProperties(constrainer=RealToPSDBijector()))
+            props = None
+            if self.emission_dim == 2:
+                props = ParamsLinearRegressionHMMEmissions(
+                    weights=ParameterProperties(constrainer=NambuBijector2D()),
+                    biases=ParameterProperties(trainable=False),
+                    covs=ParameterProperties(constrainer=RealToPSDBijector()))
+            elif self.emission_dim == 3:
+                props = ParamsLinearRegressionHMMEmissions(
+                    weights=ParameterProperties(constrainer=NambuBijector3D()),
+                    biases=ParameterProperties(trainable=False),
+                    covs=ParameterProperties(constrainer=RealToPSDBijector()))
+            elif self.emission_dim == 4:
+                props = ParamsLinearRegressionHMMEmissions(
+                    weights=ParameterProperties(constrainer=NambuBijector4D()),
+                    biases=ParameterProperties(trainable=False),
+                    covs=ParameterProperties(constrainer=RealToPSDBijector()))
+            else:
+                raise ValueError(f"Nambu model not implemented for emission dimension {self.emission_dim}")
         return params, props
 
 
