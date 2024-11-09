@@ -338,12 +338,13 @@ class NambuBijector2D(tfb.Bijector):
         m22 = -c
 
         # need to put 1.0 along diagonal to account for time discretization
-        return jnp.array([[1.0 + m11, m12], [m21, 1.0 + m22]])
+        return jnp.array([[m11, m12], [m21, m22]]) + jnp.eye(2)
     
     def _tmp_inverse(self, x):
-        m12 = x[0, 1]
-        m21 = x[1, 0]
-        m11 = x[0, 0]
+        M = x - jnp.eye(2)
+        m12 = M[0, 1]
+        m21 = M[1, 0]
+        m11 = M[0, 0]
         # m22 = x[1, 1]
         # assert jnp.allclose(m11, -m22)
-        return jnp.array([-m21 / 2.0, m12 / 2.0, m11-1.0])
+        return jnp.array([-m21 / 2.0, m12 / 2.0, m11])
