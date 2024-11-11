@@ -406,6 +406,7 @@ class SSM(ABC):
         props: PropertySet,
         emissions: Union[Float[Array, "num_timesteps emission_dim"],
                          Float[Array, "num_batches num_timesteps emission_dim"]],
+        inverse: bool=False,
         inputs: Optional[Union[Float[Array, "num_timesteps input_dim"],
                                Float[Array, "num_batches num_timesteps input_dim"]]]=None,
         optimizer: optax.GradientTransformation=optax.adam(1e-3),
@@ -446,7 +447,10 @@ class SSM(ABC):
         batch_emissions = ensure_array_has_batch_dim(emissions, self.emission_shape)
         batch_inputs = ensure_array_has_batch_dim(inputs, self.inputs_shape)
 
-        unc_params = to_unconstrained(params, props)
+        unc_params = params
+        if not inverse:
+            unc_params = to_unconstrained(params, props)
+        # print(unc_params)
 
         def _loss_fn(unc_params, minibatch):
             """Default objective function."""
@@ -466,6 +470,6 @@ class SSM(ABC):
                                      num_epochs=num_epochs,
                                      shuffle=shuffle,
                                      key=key)
-
+        # print(unc_params)
         params = from_unconstrained(unc_params, props)
         return params, losses

@@ -265,35 +265,52 @@ class NambuBijector3D(tfb.Bijector):
 
     def _tmp_forward(self, x):
        
-        a, b, c, g, h, k = x
+        a, b, c, d, e, f, g, h, k = x
+
+        a = a**2
+        b = b**2
+        c = c**2
         
-        m12 = 2.0 * b * k
-        m13 = -2.0 * c * h
-        m21 = -2.0 * a * k
-        m23 = 2.0 * g * c
-        m31 = 2.0 * a * h
-        m32 = -2.0 * b * g
+        d = 0.0
+        e = 0.0
+        f = 0.0
+        
+        m11 = d*k - e*h
+        m12 = 2.0*b*k - f*h
+        m13 = f*k - 2.0*c*h
+        m21 = e*g - 2.0*a*k
+        m22 = f*g - d*k
+        m23 = 2.0*g*c - e*k
+        m31 = 2.0*a*h - d*g
+        m32 = d*h - 2.0*b*g
+        m33 = e*h - f*g
 
         # need to put 1.0 along diagonal to account for time discretization
-        return jnp.array([[1.0, m12, m13], [m21, 1.0, m23], [m31, m32, 1.0]])
+        return jnp.array([[m11, m12, m13], [m21, m22, m23], [m31, m32, m33]]) + jnp.eye(3)
     
     def _equations(self, params, x):
-        a, b, c, g, h, k = params
-        M = x
+        a, b, c, d, e, f, g, h, k = params
+        M = x - jnp.eye(3)
+        m11 = M[0, 0]
         m12 = M[0, 1]
         m13 = M[0, 2]
         m21 = M[1, 0]
+        m22 = M[1, 1]
         m23 = M[1, 2]
         m31 = M[2, 0]
         m32 = M[2, 1]
+        m33 = M[2, 2]
         
         return jnp.array([
-            m12 - (2.0 * b * k),
-            m13 - (-2.0 * c * h),
-            m21 - (-2.0 * a * k),
-            m23 - (2.0 * g * c),
-            m31 - (2.0 * a * h),
-            m32 - (-2.0 * b * g)
+            m11 - (d*k - e*h),
+            m12 - (2.0*b*k - f*h),
+            m13 - (f*k - 2.0*c*h),
+            m21 - (e*g - 2.0*a*k),
+            m22 - (f*g - d*k),
+            m23 - (2.0*g*c - e*k),
+            m31 - (2.0*a*h - d*g),
+            m32 - (d*h - 2.0*b*g),
+            m33 - (e*h - f*g)
         ])
     
     def _recover_params(self, eq, init_center=0.0, init_scale=1.0, max_iter=20000):
@@ -303,7 +320,7 @@ class NambuBijector3D(tfb.Bijector):
             if num_tries > 0 and num_tries % 2000 == 0:
                 init_scale *= 0.1
                 print(f"Reducing scale to {init_scale}")
-            res = root(eq, init_scale * np.random.randn(6) + init_center)
+            res = root(eq, init_scale * np.random.randn(9) + init_center)
             if res.success:
                 break
             num_tries += 1
@@ -316,6 +333,43 @@ class NambuBijector3D(tfb.Bijector):
         eqs = jax.jit(lambda params: self._equations(params, x))
         res = self._recover_params(eqs)
         return res.x
+    
+class NambuBijector3DNoInverse(tfb.Bijector):
+    """Bijector that maps unconstrained real vectors to Nambu dynamics."""
+    def __init__(self, name=None, validate_args=False):
+        super().__init__(name=name, validate_args=validate_args, forward_min_event_ndims=1, inverse_min_event_ndims=2)
+
+    def _forward(self, x):
+        return jax.vmap(self._tmp_forward, in_axes=(0,))(x)
+
+    def _tmp_forward(self, x):
+       
+        a, b, c, d, e, f, g, h, k = x
+
+        a = a**2
+        b = b**2
+        c = c**2
+
+        d = 0.0
+        e = 0.0
+        f = 0.0
+        
+        m11 = d*k - e*h
+        m12 = 2.0*b*k - f*h
+        m13 = f*k - 2.0*c*h
+        m21 = e*g - 2.0*a*k
+        m22 = f*g - d*k
+        m23 = 2.0*g*c - e*k
+        m31 = 2.0*a*h - d*g
+        m32 = d*h - 2.0*b*g
+        m33 = e*h - f*g
+
+        # need to put 1.0 along diagonal to account for time discretization
+        return jnp.array([[m11, m12, m13], [m21, m22, m23], [m31, m32, m33]]) + jnp.eye(3)
+    
+    def _inverse(self, y):
+        return jnp.zeros_like(y)
+
 
 class NambuBijector2D(tfb.Bijector):
     """Bijector that maps unconstrained real vectors to Nambu dynamics."""
