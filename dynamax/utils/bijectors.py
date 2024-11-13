@@ -385,6 +385,12 @@ class NambuBijector2D(tfb.Bijector):
     def _tmp_forward(self, x):
        
         a, b, c = x
+
+        # a = a**2
+        # b = b**2
+        # a = jnp.exp(a)
+        # b = jnp.exp(b)
+        # c = 0.0
         
         m12 = 2.0 * b
         m21 = -2.0 * a
@@ -401,4 +407,7 @@ class NambuBijector2D(tfb.Bijector):
         m11 = M[0, 0]
         # m22 = x[1, 1]
         # assert jnp.allclose(m11, -m22)
+        # return jnp.array([jnp.sqrt(-m21 / 2.0), jnp.sqrt(m12 / 2.0), m11])
+        # return jnp.array([jnp.log(jnp.sqrt(-m21 / 2.0)), jnp.log(jnp.sqrt(m12 / 2.0)), m11])
         return jnp.array([-m21 / 2.0, m12 / 2.0, m11])
+        # return jnp.array([jnp.sqrt(-m21 / 2.0), jnp.sqrt(m12 / 2.0), 0.0])
