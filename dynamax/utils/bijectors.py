@@ -333,6 +333,86 @@ class NambuBijector3D(tfb.Bijector):
         eqs = jax.jit(lambda params: self._equations(params, x))
         res = self._recover_params(eqs)
         return res.x
+
+class NambuBijector3DSimple(tfb.Bijector):
+    """Bijector that maps unconstrained real vectors to Nambu dynamics."""
+    def __init__(self, name=None, validate_args=False):
+        super().__init__(name=name, validate_args=validate_args, forward_min_event_ndims=1, inverse_min_event_ndims=2)
+
+    def _forward(self, x):
+        return jax.vmap(self._tmp_forward, in_axes=(0,))(x)
+
+    def _inverse(self, y):
+        # return jax.vmap(self._tmp_inverse, in_axes=(0,))(y)
+        results = []
+        for element in y:
+            print(element)
+            print("here")
+            result = self._tmp_inverse(element)
+            results.append(result)
+        print("done")
+        return jnp.array(results)
+
+    def _tmp_forward(self, x):
+       
+        a, b, c, g, h, k = x
+
+        a = a**2
+        b = b**2
+        c = c**2
+        
+        m12 = 2.0*b*k
+        m13 = -2.0*c*h
+        m21 = -2.0*a*k
+        m23 = 2.0*g*c
+        m31 = 2.0*a*h
+        m32 = -2.0*b*g
+
+        # need to put 1.0 along diagonal to account for time discretization
+        return jnp.array([[0.0, m12, m13], [m21, 0.0, m23], [m31, m32, 0.0]]) + jnp.eye(3)
+    
+    def _equations(self, params, x):
+        a, b, c, g, h, k = params
+        M = x - jnp.eye(3)
+        m11 = M[0, 0]
+        m12 = M[0, 1]
+        m13 = M[0, 2]
+        m21 = M[1, 0]
+        m22 = M[1, 1]
+        m23 = M[1, 2]
+        m31 = M[2, 0]
+        m32 = M[2, 1]
+        m33 = M[2, 2]
+        
+        return jnp.array([
+            m12 - (2.0*b*k),
+            m13 - (-2.0*c*h),
+            m21 - (-2.0*a*k),
+            m23 - (2.0*g*c),
+            m31 - (2.0*a*h),
+            m32 - (-2.0*b*g),
+        ])
+    
+    def _recover_params(self, eq, init_center=0.0, init_scale=1.0, max_iter=20000):
+        res = None
+        num_tries = 0
+        while num_tries < max_iter:
+            if num_tries > 0 and num_tries % 2000 == 0:
+                init_scale *= 0.1
+                print(f"Reducing scale to {init_scale}")
+            res = root(eq, init_scale * np.random.randn(6) + init_center)
+            if res.success:
+                break
+            num_tries += 1
+        if num_tries == max_iter:
+            raise ValueError("Failed to converge")
+            # print("Failed to converge")
+        return res
+    
+    def _tmp_inverse(self, x):
+        eqs = jax.jit(lambda params: self._equations(params, x))
+        res = self._recover_params(eqs)
+        return res.x
     
 class NambuBijector3DNoInverse(tfb.Bijector):
     """Bijector that maps unconstrained real vectors to Nambu dynamics."""

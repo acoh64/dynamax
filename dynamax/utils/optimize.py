@@ -48,36 +48,132 @@ def run_sgd(loss_fn,
         hmm: HMM with optimized parameters.
         losses: Output of loss_fn stored at each step.
     """
+
     opt_state = optimizer.init(params)
     num_batches = pytree_len(dataset)
+   
     num_complete_batches, leftover = jnp.divmod(num_batches, batch_size)
+    
     num_batches = num_complete_batches + jnp.where(leftover == 0, 0, 1)
+    
     loss_grad_fn = value_and_grad(loss_fn)
 
     if batch_size >= num_batches:
+       
         shuffle = False
 
     def train_step(carry, key):
+        
         params, opt_state = carry
+        
+       
         sample_generator = sample_minibatches(key, dataset, batch_size, shuffle)
+        
 
         def cond_fun(state):
+            
             itr, params, opt_state, avg_loss = state
             return itr < num_batches
 
         def body_fun(state):
+            
             itr, params, opt_state, avg_loss = state
+            
             minibatch = next(sample_generator)  ## TODO: Does this work inside while_loop??
+            
             this_loss, grads = loss_grad_fn(params, minibatch)
+            
             updates, opt_state = optimizer.update(grads, opt_state)
+            
             params = optax.apply_updates(params, updates)
             return itr + 1, params, opt_state, (avg_loss * itr + this_loss) / (itr + 1)
 
         init_val = (0, params, opt_state, 0.0)
+        
         _, params, opt_state, avg_loss = lax.while_loop(cond_fun, body_fun, init_val)
         return (params, opt_state), avg_loss
 
     keys = jr.split(key, num_epochs)
+    
+    (params, _), losses = lax.scan(train_step, (params, opt_state), keys)
+    return params, losses
+
+def run_sgd_batch(loss_fn,
+                params,
+                dataset,
+                optimizer=optax.adam(1e-3),
+                batch_size=1,
+                num_epochs=50,
+                shuffle=False,
+                key=jr.PRNGKey(0)):
+    """
+    Note that batch_emissions is initially of shape (N,T)
+    where N is the number of independent sequences and
+    T is the length of a sequence. Then, a random susbet with shape (B, T)
+    of entire sequence, not time steps, is sampled at each step where B is
+    batch size.
+
+    Args:
+        loss_fn: Objective function.
+        params: initial value of parameters to be estimated.
+        dataset: PyTree of data arrays with leading batch dimension
+        optmizer: Optimizer.
+        batch_size: Number of sequences used at each update step.
+        num_iters: Iterations made on only one mini-batch.
+        shuffle: Indicates whether to shuffle emissions.
+        key: RNG key.
+
+    Returns:
+        hmm: HMM with optimized parameters.
+        losses: Output of loss_fn stored at each step.
+    """
+
+    opt_state = optimizer.init(params)
+    num_batches = pytree_len(dataset)
+   
+    num_complete_batches, leftover = jnp.divmod(num_batches, batch_size)
+    
+    num_batches = num_complete_batches + jnp.where(leftover == 0, 0, 1)
+    
+    loss_grad_fn = value_and_grad(loss_fn)
+
+    if batch_size >= num_batches:
+       
+        shuffle = False
+
+    def train_step(carry, key):
+        
+        params, opt_state = carry
+        
+       
+        sample_generator = sample_minibatches(key, dataset, batch_size, shuffle)
+        
+
+        def cond_fun(state):
+            
+            itr, params, opt_state, avg_loss = state
+            return itr < num_batches
+
+        def body_fun(state):
+            
+            itr, params, opt_state, avg_loss = state
+            
+            minibatch = dataset#minibatch = next(sample_generator)  ## TODO: Does this work inside while_loop??
+            
+            this_loss, grads = loss_grad_fn(params, minibatch)
+            
+            updates, opt_state = optimizer.update(grads, opt_state)
+            
+            params = optax.apply_updates(params, updates)
+            return itr + 1, params, opt_state, (avg_loss * itr + this_loss) / (itr + 1)
+
+        init_val = (0, params, opt_state, 0.0)
+        
+        _, params, opt_state, avg_loss = lax.while_loop(cond_fun, body_fun, init_val)
+        return (params, opt_state), avg_loss
+
+    keys = jr.split(key, num_epochs)
+    
     (params, _), losses = lax.scan(train_step, (params, opt_state), keys)
     return params, losses
 

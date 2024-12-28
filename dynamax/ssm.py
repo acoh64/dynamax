@@ -15,7 +15,7 @@ from typing_extensions import Protocol
 from dynamax.parameters import to_unconstrained, from_unconstrained
 from dynamax.parameters import ParameterSet, PropertySet
 from dynamax.types import PRNGKey, Scalar
-from dynamax.utils.optimize import run_sgd
+from dynamax.utils.optimize import run_sgd, run_sgd_batch
 from dynamax.utils.utils import ensure_array_has_batch_dim
 
 
@@ -391,6 +391,14 @@ class SSM(ABC):
             # debug.print('e_step: {x}', x=(batch_stats, lls))
             # debug.print('m_step{y}', y=params)
             return params, m_step_state, lp
+        
+        if self.num_states == 1:
+            @jit
+            def em_step(params, m_step_state):
+                batch_stats, lls = vmap(partial(self.e_step, params))(batch_emissions, batch_inputs)
+                lp = lls.sum()
+                params, m_step_state = self.m_step(params, props, batch_stats, m_step_state)
+                return params, m_step_state, lp
 
         log_probs = []
         m_step_state = self.initialize_m_step_state(params, props)
@@ -443,6 +451,7 @@ class SSM(ABC):
             tuple of new parameters and losses (negative scaled marginal log probs) over the course of SGD iterations.
 
         """
+        
         # Make sure the emissions and inputs have batch dimensions
         batch_emissions = ensure_array_has_batch_dim(emissions, self.emission_shape)
         batch_inputs = ensure_array_has_batch_dim(inputs, self.inputs_shape)
@@ -460,6 +469,17 @@ class SSM(ABC):
             minibatch_lls = vmap(partial(self.marginal_log_prob, params))(minibatch_emissions, minibatch_inputs)
             lp = self.log_prior(params) + minibatch_lls.sum() * scale
             return -lp / batch_emissions.size
+        
+        if self.num_states == 1:
+           
+            def _loss_fn(unc_params, minibatch):
+                """Default objective function."""
+                params = from_unconstrained(unc_params, props)
+                minibatch_emissions, minibatch_inputs = minibatch
+                scale = len(batch_emissions) / len(minibatch_emissions)
+                minibatch_lls = vmap(partial(self.marginal_log_prob, params))(minibatch_emissions, minibatch_inputs)
+                lp = minibatch_lls.sum() * scale
+                return -lp / batch_emissions.size
 
         dataset = (batch_emissions, batch_inputs)
         unc_params, losses = run_sgd(_loss_fn,
@@ -473,3 +493,87 @@ class SSM(ABC):
         # print(unc_params)
         params = from_unconstrained(unc_params, props)
         return params, losses
+
+    def fit_sgd_batch(
+            self,
+            params: ParameterSet,
+            props: PropertySet,
+            emissions: Union[Float[Array, "num_timesteps emission_dim"],
+                            Float[Array, "num_batches num_timesteps emission_dim"]],
+            inverse: bool=False,
+            inputs: Optional[Union[Float[Array, "num_timesteps input_dim"],
+                                Float[Array, "num_batches num_timesteps input_dim"]]]=None,
+            optimizer: optax.GradientTransformation=optax.adam(1e-3),
+            batch_size: int=1,
+            num_epochs: int=50,
+            shuffle: bool=False,
+            key: PRNGKey=jr.PRNGKey(0)
+        ) -> Tuple[ParameterSet, Float[Array, "niter"]]:
+            r"""Compute parameter MLE/ MAP estimate using Stochastic Gradient Descent (SGD).
+
+            SGD aims to find parameters that maximize the marginal log probability,
+
+            $$\theta^\star = \mathrm{argmax}_\theta \; \log p(y_{1:T}, \theta \mid u_{1:T})$$
+
+            by minimizing the _negative_ of that quantity.
+
+            *Note:* ``emissions`` *and* ``inputs`` *can either be single sequences or batches of sequences.*
+
+            On each iteration, the algorithm grabs a *minibatch* of sequences and takes a gradient step.
+            One pass through the entire set of sequences is called an *epoch*.
+
+            Args:
+                params: model parameters $\theta$
+                props: properties specifying which parameters should be learned
+                emissions: one or more sequences of emissions
+                inputs: one or more sequences of corresponding inputs
+                optimizer: an `optax` optimizer for minimization
+                batch_size: number of sequences per minibatch
+                num_epochs: number of epochs of SGD to run
+                key: a random number generator for selecting minibatches
+                verbose: whether or not to show a progress bar
+
+            Returns:
+                tuple of new parameters and losses (negative scaled marginal log probs) over the course of SGD iterations.
+
+            """
+            # Make sure the emissions and inputs have batch dimensions
+            batch_emissions = ensure_array_has_batch_dim(emissions, self.emission_shape)
+            batch_inputs = ensure_array_has_batch_dim(inputs, self.inputs_shape)
+
+            unc_params = params
+            if not inverse:
+                unc_params = to_unconstrained(params, props)
+            # print(unc_params)
+
+            def _loss_fn(unc_params, minibatch):
+                """Default objective function."""
+                params = from_unconstrained(unc_params, props)
+                minibatch_emissions, minibatch_inputs = minibatch
+                scale = len(batch_emissions) / len(minibatch_emissions)
+                minibatch_lls = vmap(partial(self.marginal_log_prob, params))(minibatch_emissions, minibatch_inputs)
+                lp = self.log_prior(params) + minibatch_lls.sum() * scale
+                return -lp / batch_emissions.size
+            
+            if self.num_states == 1:
+                def _loss_fn(unc_params, minibatch):
+                    """Default objective function."""
+                    params = from_unconstrained(unc_params, props)
+                    minibatch_emissions, minibatch_inputs = minibatch
+                    scale = len(batch_emissions) / len(minibatch_emissions)
+                    minibatch_lls = vmap(partial(self.marginal_log_prob, params))(minibatch_emissions, minibatch_inputs)
+                    lp = minibatch_lls.sum() * scale
+                    return -lp / batch_emissions.size
+
+            dataset = (batch_emissions, batch_inputs)
+            unc_params, losses = run_sgd_batch(_loss_fn,
+                                        unc_params,
+                                        dataset,
+                                        optimizer=optimizer,
+                                        batch_size=batch_size,
+                                        num_epochs=num_epochs,
+                                        shuffle=shuffle,
+                                        key=key)
+            # print(unc_params)
+            params = from_unconstrained(unc_params, props)
+            return params, losses
