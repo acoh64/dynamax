@@ -450,6 +450,51 @@ class NambuBijector3DNoInverse(tfb.Bijector):
     def _inverse(self, y):
         return jnp.zeros_like(y)
 
+class NambuBijector3DNoInverseScale(tfb.Bijector):
+    """Bijector that maps unconstrained real vectors to Nambu dynamics."""
+    def __init__(self, params, name=None, validate_args=False):
+        self.params = params
+        print(self.params.shape)
+        print(self.params)
+        super().__init__(name=name, validate_args=validate_args, forward_min_event_ndims=1, inverse_min_event_ndims=2)
+
+    def _forward(self, x):
+        return jax.vmap(self._tmp_forward, in_axes=(0,))(x)
+
+    def _tmp_forward(self, x):
+       
+        scale = x
+
+        print("scale", scale.shape)
+
+        a = scale * self.params[0]**2
+        b = scale * self.params[1]**2
+        c = scale * self.params[2]**2
+
+        d = 0.0
+        e = 0.0
+        f = 0.0
+
+        g = scale * self.params[6]
+        h = scale * self.params[7]
+        k = scale * self.params[8]
+        
+        m11 = d*k - e*h
+        m12 = 2.0*b*k - f*h
+        m13 = f*k - 2.0*c*h
+        m21 = e*g - 2.0*a*k
+        m22 = f*g - d*k
+        m23 = 2.0*g*c - e*k
+        m31 = 2.0*a*h - d*g
+        m32 = d*h - 2.0*b*g
+        m33 = e*h - f*g
+
+        # need to put 1.0 along diagonal to account for time discretization
+        return jnp.array([[m11, m12, m13], [m21, m22, m23], [m31, m32, m33]]) + jnp.eye(3)
+    
+    def _inverse(self, y):
+        return jnp.zeros_like(y)
+
 
 class NambuBijector2D(tfb.Bijector):
     """Bijector that maps unconstrained real vectors to Nambu dynamics."""
